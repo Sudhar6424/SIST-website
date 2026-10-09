@@ -1,5 +1,5 @@
 import { ArrowRight, CircleCheck, Clock3 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { GOOGLE_REGISTRATION_FORM_URL } from "../../config/registration";
 
 const plans = [
   {
@@ -50,7 +50,7 @@ export default function JoinMission() {
 
         <div className="home-join-bar">
           <p><Clock3 size={15} /> Round 1 Registration &amp; PPT Deadline: <strong>20 October 2026, 11:00 PM IST</strong></p>
-          <Link to="/register" className="home-cta-button">REGISTER YOUR TEAM <ArrowRight size={16} /></Link>
+          <a href={GOOGLE_REGISTRATION_FORM_URL} target="_blank" rel="noopener noreferrer" className="home-cta-button">REGISTER YOUR TEAM <ArrowRight size={16} /></a>
         </div>
       </div>
     </section>

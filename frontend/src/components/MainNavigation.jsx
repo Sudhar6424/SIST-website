@@ -12,7 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { GOOGLE_REGISTRATION_FORM_URL } from "../config/registration";
 
 // Each item scrolls to its section on the Home page.
 const navItems = [
@@ -53,7 +53,7 @@ export default function MainNavigation() {
           ))}
         </nav>
 
-        <Link className="home-register" to="/register">REGISTER NOW <ChevronRight size={17} /></Link>
+        <a className="home-register" href={GOOGLE_REGISTRATION_FORM_URL} target="_blank" rel="noopener noreferrer">REGISTER NOW <ChevronRight size={17} /></a>
 
         <button
           type="button"
@@ -72,7 +72,7 @@ export default function MainNavigation() {
           {navItems.map(({ label, href, icon: Icon }) => (
             <a href={href} key={label} onClick={() => setMenuOpen(false)}><Icon size={15} /><span>{label}</span></a>
           ))}
-          <Link className="home-mobile-register" to="/register" onClick={() => setMenuOpen(false)}>REGISTER NOW <ChevronRight size={17} /></Link>
+          <a className="home-mobile-register" href={GOOGLE_REGISTRATION_FORM_URL} target="_blank" rel="noopener noreferrer" onClick={() => setMenuOpen(false)}>REGISTER NOW <ChevronRight size={17} /></a>
         </nav>
       ) : null}
     </header>

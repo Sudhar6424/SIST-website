@@ -1,5 +1,5 @@
 import { ArrowRight, Cpu, Globe, HeartPulse, Leaf, Lightbulb, ShieldCheck } from "lucide-react";
-import { Link } from "react-router-dom";
+import { GOOGLE_REGISTRATION_FORM_URL } from "../../config/registration";
 
 const themes = [
   {
@@ -82,7 +82,7 @@ export default function ProblemThemes() {
             <strong>READY TO CHOOSE YOUR DOMAIN?</strong>
             <p>Register your team of 4–6 members and submit your Round 1 PPT abstract before 20 October 2026.</p>
           </div>
-          <Link to="/register" className="home-cta-button">REGISTER YOUR TEAM NOW <ArrowRight size={16} /></Link>
+          <a href={GOOGLE_REGISTRATION_FORM_URL} target="_blank" rel="noopener noreferrer" className="home-cta-button">REGISTER YOUR TEAM NOW <ArrowRight size={16} /></a>
         </div>
       </div>
     </section>
