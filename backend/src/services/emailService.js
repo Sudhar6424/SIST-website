@@ -1,16 +1,20 @@
-// Central email service. Every transactional email is sent through Gmail SMTP from this backend.
-// There is no other provider: the browser never sends email and never sees the Gmail credentials.
-import { buildPaymentConfirmationEmail, POSTER_CID, POSTER_IMAGE_PATH } from "../templates/paymentConfirmationEmail.js";
+// Central email service. Every transactional email is sent through the Resend API (HTTPS) from this backend.
+// There is no other provider: the browser never sends email and never sees the Resend API key.
+import { buildPaymentConfirmationEmail, POSTER_CID } from "../templates/paymentConfirmationEmail.js";
 import { buildSelectionEmail } from "../templates/resultEmail.js";
 import { buildRoundResultEmail } from "../templates/roundResultEmail.js";
 import { buildRoundUpdateEmail } from "../templates/roundUpdateEmail.js";
 import { getTeamLoginUrl, getTeamPortalPassword } from "./submissionService.js";
-import { CONNECTION_ERRORS, lastSmtpProbe, probeSmtpPorts, sendWithSmtp, smtpConfigured, smtpUser, verifySmtp } from "./smtpTransport.js";
+import { resendConfigured, resendFromAddress, sendWithResend, verifyResend } from "./resendTransport.js";
 
 // Team Head Portal login details included in team emails (the email address itself comes from each team record).
 const portalAccess = () => ({ loginUrl: getTeamLoginUrl(), password: getTeamPortalPassword() });
 
-export const emailProvider = () => "gmail-smtp";
+export const emailProvider = () => "resend";
+
+// The poster is loaded from a public URL in the email (override with EMAIL_POSTER_URL).
+const DEFAULT_POSTER_URL = "https://raw.githubusercontent.com/Sudhar6424/sathyabama-website/main/backend/src/assets/dexathon-2026-poster.jpg";
+const posterUrl = () => (process.env.EMAIL_POSTER_URL || "").trim() || DEFAULT_POSTER_URL;
 
 // The recipient always comes from the team's registration record (Team Head email); never hardcoded.
 const getRecipientEmail = (registration) => {
@@ -20,20 +24,20 @@ const getRecipientEmail = (registration) => {
 };
 
 // The one place that sends: logs start/success/failure (recipient, type, message ID only — never secrets).
-const sendEmail = async ({ type, to, subject, html, text, attachments }) => {
+// "Sent" means Resend accepted the email for delivery; inbox delivery is tracked in the Resend dashboard (Emails).
+const sendEmail = async ({ type, to, subject, html, text }) => {
   console.log(`EMAIL_SEND_START type=${type} to=${to}`);
   try {
-    const { messageId } = await sendWithSmtp({ to, subject, html, text, attachments });
+    const { messageId } = await sendWithResend({ to, subject, html, text });
     console.log(`EMAIL_SEND_SUCCESS type=${type} to=${to} messageId=${messageId || "n/a"}`);
     return { sent: true, messageId };
   } catch (error) {
-    if (CONNECTION_ERRORS.has(error.code)) await probeSmtpPorts().catch(() => null);
-    console.error(`EMAIL_SEND_FAILED type=${type} to=${to} code=${error.code || "-"} status=${error.responseCode ?? "-"} reason="${describeEmailError(error)}"`);
+    console.error(`EMAIL_SEND_FAILED type=${type} to=${to} code=${error.code || "-"} status=${error.responseCode ?? "-"} resendError=${error.resendName || "-"} reason="${describeEmailError(error)}"`);
     throw error;
   }
 };
 
-// Payment confirmation (admin verified the payment). Resolves { sent, messageId } only after Gmail accepted it.
+// Payment confirmation (admin verified the payment). Resolves { sent, messageId } only after Resend accepted it.
 export const sendPaymentConfirmationEmail = async (registration) => {
   const to = getRecipientEmail(registration);
   const { html, text } = buildPaymentConfirmationEmail(registration, { portal: portalAccess() });
@@ -41,10 +45,8 @@ export const sendPaymentConfirmationEmail = async (registration) => {
     type: "payment-confirmation",
     to,
     subject: "DEXATHON 2026 — Payment Confirmed ✓",
-    html,
+    html: html.split(`cid:${POSTER_CID}`).join(posterUrl()),
     text,
-    // The poster is embedded in the email (cid:) so it shows without loading external images.
-    attachments: [{ filename: "dexathon-2026-poster.jpg", path: POSTER_IMAGE_PATH, cid: POSTER_CID }],
   });
 };
 export const sendPaymentConfirmation = sendPaymentConfirmationEmail;
@@ -62,21 +64,21 @@ export const sendConfirmationEmail = async (registration) => {
   return result.sent;
 };
 
-// Second-round selection after the Round 1 PDF evaluation. Returns true only when Gmail accepted it.
+// Second-round selection after the Round 1 PDF evaluation. Returns true only when Resend accepted it.
 export const sendSelectionEmail = async (registration) => {
   const to = getRecipientEmail(registration);
   const { subject, html, text } = buildSelectionEmail(registration);
   return (await sendEmail({ type: "round2-selection", to, subject, html, text })).sent;
 };
 
-// Round progress update. Returns true only when Gmail accepted it.
+// Round progress update. Returns true only when Resend accepted it.
 export const sendRoundUpdateEmail = async (registration, rounds) => {
   const to = getRecipientEmail(registration);
   const { subject, html, text } = buildRoundUpdateEmail(registration, rounds, portalAccess());
   return (await sendEmail({ type: "round-update", to, subject, html, text })).sent;
 };
 
-// Round result (SELECTED / REJECTED for one round). Returns true only when Gmail accepted it.
+// Round result (SELECTED / REJECTED for one round). Returns true only when Resend accepted it.
 export const sendRoundResultEmail = async (registration, round, decision) => {
   const to = getRecipientEmail(registration);
   const { subject, html, text } = buildRoundResultEmail(registration, round, decision, portalAccess());
@@ -91,54 +93,55 @@ export const sendTestEmail = async (to) => sendEmail({
   type: "admin-test",
   to,
   subject: "DEXATHON 2026 — Email delivery test",
-  html: `<div style="font-family:Arial,sans-serif;font-size:15px;color:#16171b"><h2 style="margin:0 0 8px">DEXATHON 2026</h2><p>This is a test email sent by the DEXATHON backend through Gmail SMTP.</p><p>If you received it, payment confirmation emails can be delivered.</p></div>`,
-  text: "DEXATHON 2026\n\nThis is a test email sent by the DEXATHON backend through Gmail SMTP.\nIf you received it, payment confirmation emails can be delivered.",
+  html: `<div style="font-family:Arial,sans-serif;font-size:15px;color:#16171b"><h2 style="margin:0 0 8px">DEXATHON 2026</h2><p>This is a test email sent by the DEXATHON backend through the Resend API.</p><p>If you received it, payment confirmation emails can be delivered.</p></div>`,
+  text: "DEXATHON 2026\n\nThis is a test email sent by the DEXATHON backend through the Resend API.\nIf you received it, payment confirmation emails can be delivered.",
 });
 
-// Plain-language reason for a failed send, safe to show to admins (never includes credentials).
+// Plain-language reason for a failed send, safe to show to admins (never includes the API key).
 export const describeEmailError = (error) => {
   const code = error?.code || "";
-  const response = Number(error?.responseCode) || 0;
+  const status = Number(error?.responseCode) || 0;
+  const name = error?.resendName || "";
   const text = String(error?.message || "");
+  const detail = text.replace(/^Resend rejected the email \(HTTP \d+\): /, "");
   if (code === "ENORECIPIENT") return "This team has no Team Head email address.";
-  if (code === "ESMTPCONFIG") return /Gmail address/.test(text)
-    ? "Email is not configured: EMAIL_USER must be a Gmail address."
-    : "Email is not configured: set EMAIL_USER and EMAIL_PASSWORD in the backend environment.";
-  if (code === "EAUTH" || response === 535 || response === 534) return "Gmail rejected the sender login (EMAIL_USER / EMAIL_PASSWORD). Use a Gmail App Password (2-Step Verification must be on), not the normal Gmail password.";
-  if (CONNECTION_ERRORS.has(code)) {
-    const probe = lastSmtpProbe();
-    if (probe?.smtpBlocked) return `The server's hosting provider blocks outbound SMTP: Gmail ports 465 (${probe.smtp465}) and 587 (${probe.smtp587}) are unreachable while HTTPS works. Gmail SMTP cannot send from this host until the hosting plan allows outbound SMTP.`;
-    if (probe && probe.https443 !== "open") return "This server has no working internet connection right now (HTTPS also failed). Try again shortly.";
-    return "Could not connect to Gmail SMTP (smtp.gmail.com:465). The connection dropped; please try again.";
-  }
-  if (code === "EENVELOPE" || response === 550 || response === 553) return "Gmail rejected the recipient email address. Check the Team Head email.";
-  if (response === 421 || response === 454 || /rate|limit|too many/i.test(text)) return "Gmail sending limit reached. Please try again later.";
-  if (response >= 400 && response < 500) return "Gmail had a temporary error. Please try again.";
+  if (code === "ERESENDCONFIG") return /RESEND_FROM_EMAIL/.test(text)
+    ? "Resend is not configured: set RESEND_FROM_EMAIL to a sender address on a domain verified in Resend."
+    : "Resend is not configured: set RESEND_API_KEY in the backend environment (Render → Environment).";
+  if (code === "ERESENDDOMAIN") return `${text} Resend only sends from verified domains.`;
+  if (code === "ETIMEDOUT") return "Could not reach the Resend API. Check the server's internet connection and try again.";
+  if (status === 401 || name === "missing_api_key" || name === "invalid_api_key") return "Resend rejected the API key (RESEND_API_KEY). Create a new key in Resend → API Keys.";
+  if (/only send testing emails to your own email/i.test(text)) return "Resend is in testing mode: without a verified domain it only delivers to the Resend account's own email. Verify your domain in Resend → Domains and set RESEND_FROM_EMAIL to an address on it.";
+  if (/domain is not verified/i.test(text)) return "Resend rejected the sender (RESEND_FROM_EMAIL): its domain is not verified. Verify it in Resend → Domains.";
+  if (status === 403) return `Resend refused the email: ${detail}`;
+  if (status === 422 && /\bto\b|recipient/i.test(text)) return "Resend rejected the recipient email address. Check the Team Head email.";
+  if (status === 422 || status === 400) return `Resend rejected the email: ${detail}`;
+  if (status === 429) return "Resend rate limit or daily quota reached. Please try again later.";
+  if (status >= 500) return "Resend had a temporary server error. Please try again.";
   return "The email could not be sent. Please try again.";
 };
 
-// Startup check: which email settings are present (names only, never the values).
+// Startup check: which Resend settings are present (names only, never the values).
 export const logEmailConfiguration = () => {
   const state = (value) => (value && String(value).trim() ? "configured" : "MISSING");
-  console.log("Email provider: Gmail SMTP (smtp.gmail.com:465)");
-  console.log(`  EMAIL_USER: ${state(smtpUser())}`);
-  console.log(`  EMAIL_PASSWORD: ${state(process.env.EMAIL_PASSWORD)}`);
-  if (!smtpConfigured()) console.error("Gmail SMTP is not fully configured. Set EMAIL_USER and EMAIL_PASSWORD. Emails will fail until they are set.");
+  console.log("Email provider: Resend API (https://api.resend.com)");
+  console.log(`  RESEND_API_KEY: ${state(process.env.RESEND_API_KEY)}`);
+  console.log(`  RESEND_FROM_EMAIL: ${state(process.env.RESEND_FROM_EMAIL)}${resendFromAddress() ? ` (domain ${resendFromAddress().split("@")[1] || "?"})` : ""}`);
+  if (!resendConfigured()) console.error("Resend is not fully configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL. Emails will fail until they are set.");
 };
 
 export const verifyEmailTransport = async () => {
   try {
-    await verifySmtp();
-    console.log("Email ready (Gmail SMTP)");
-    return { ok: true, provider: emailProvider() };
+    const check = await verifyResend();
+    console.log(`Email ready (Resend API)${check.testingSender ? " — resend.dev testing sender: only the Resend account's own email can receive" : ""}`);
+    return { ok: true, provider: emailProvider(), ...(check.testingSender ? { warning: "RESEND_FROM_EMAIL uses resend.dev, which only delivers to the Resend account's own email. Verify a domain for team emails." } : {}) };
   } catch (error) {
-    const network = CONNECTION_ERRORS.has(error.code) ? await probeSmtpPorts().catch(() => null) : null;
-    console.error(`Email check failed (Gmail SMTP): ${error.code || ""} ${error.responseCode || ""} ${describeEmailError(error)}${network ? ` ports=${JSON.stringify(network)}` : ""}`);
-    return { ok: false, provider: emailProvider(), code: error.code || null, reason: describeEmailError(error), ...(network ? { network } : {}) };
+    console.error(`Email check failed (Resend): ${error.code || ""} ${error.responseCode || ""} ${describeEmailError(error)}`);
+    return { ok: false, provider: emailProvider(), code: error.code || null, reason: describeEmailError(error) };
   }
 };
 
-// Cached health check for the admin panel (a real SMTP login, at most once a minute).
+// Cached health check for the admin panel (a real Resend API call, at most once a minute).
 let emailHealth = { checkedAt: 0, result: null };
 export const getEmailHealth = async () => {
   if (emailHealth.result && Date.now() - emailHealth.checkedAt < 60_000) return emailHealth.result;

@@ -211,12 +211,12 @@ export const updateRegistration = async (request, response) => {
   return response.json({ success: true, message: "Team details updated successfully.", registration: toListItem(registration) });
 };
 
-// ---------- Payment confirmation: save the verification, then send the email through Gmail SMTP and record the real result ----------
+// ---------- Payment confirmation: save the verification, then send the email through Resend and record the real result ----------
 
 const EMAIL_SENDING_TIMEOUT_MS = 2 * 60 * 1000;
 
 // Sends the payment confirmation email for an already-verified payment and stores the real outcome:
-// "Sent" (+ SMTP message ID) only after Gmail accepted it, otherwise "Failed" with the reason.
+// "Sent" (+ Resend email ID) only after Resend accepted it, otherwise "Failed" with the reason.
 // The payment verification itself is never changed here.
 const sendConfirmationEmailNow = async (registrationId) => {
   let result = { sent: false, messageId: null, error: "The email could not be sent. Please try again." };
@@ -273,7 +273,7 @@ export const confirmPayment = async (request, response) => {
     message: "Payment verified successfully. Sending the confirmation email…",
     registration: paymentRow(confirmed),
   });
-  // 2) Then the confirmation email goes through Gmail SMTP; its real result (Sent / Failed) is stored and polled by the admin page.
+  // 2) Then the confirmation email goes through the Resend API; its real result (Sent / Failed) is stored and polled by the admin page.
   sendConfirmationEmailNow(confirmed._id).catch((error) => console.error("Confirmation email task error:", error.message));
 };
 
@@ -309,7 +309,7 @@ export const getPaymentEmailStatus = async (request, response) => {
   return response.json({ confirmationEmailStatus: status, emailSent: status === "Sent", provider: emailProvider(), confirmationEmailSentAt: row.payment?.confirmationEmailSentAt || null, confirmationEmailError: status === "Failed" ? row.payment?.confirmationEmailError || "The email could not be sent. Please try again." : null });
 };
 
-// Admin-only delivery test (Vercel → Render → Gmail SMTP → inbox). Returns the real result; never the credentials.
+// Admin-only delivery test (Vercel → Render → Resend API → inbox). Returns the real result; never the API key.
 export const sendAdminTestEmail = async (request, response) => {
   const to = typeof request.body?.to === "string" ? request.body.to.trim() : "";
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return response.status(400).json({ success: false, emailSent: false, provider: emailProvider(), error: "Enter a valid recipient email address." });
