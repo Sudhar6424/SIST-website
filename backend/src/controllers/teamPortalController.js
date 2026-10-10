@@ -1,7 +1,10 @@
+import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import mongoose from "mongoose";
 import Registration from "../models/Registration.js";
+import TeamAccess from "../models/TeamAccess.js";
 import { signTeamToken } from "../middleware/teamAuthMiddleware.js";
+import { findRegisteredTeam } from "./teamAccessController.js";
 import { currentRound, readRounds, ROUND_INFO } from "../services/roundService.js";
 import { deriveSubmissionStatus, getTeamPortalPassword, openPdfStream } from "../services/submissionService.js";
 import { PROTOTYPE_CATEGORIES, prototypeView, validatePrototypeUrl } from "../services/prototypeService.js";
@@ -24,8 +27,20 @@ const findTeamByHeadEmail = (email) => Registration.findOne({
 
 export const teamLogin = async (request, response) => {
   const email = typeof request.body.email === "string" ? request.body.email.trim().toLowerCase() : "";
-  const passwordOk = passwordMatches(request.body.password);
+  const password = typeof request.body.password === "string" ? request.body.password : "";
   if (!email || !/^\S+@\S+\.\S+$/.test(email)) return response.status(401).json(INVALID_LOGIN);
+  // Login access created by an admin (Admin → Team Login Access): that email signs in with that password only.
+  const access = await TeamAccess.findOne({ email }).select("+passwordHash");
+  if (access) {
+    if (!password || !(await bcrypt.compare(password, access.passwordHash))) return response.status(401).json(INVALID_LOGIN);
+    await TeamAccess.updateOne({ _id: access._id }, { $set: { lastLoginAt: new Date() } }, { timestamps: false });
+    // A registered team with this email opens that team; otherwise the standalone login-access account.
+    const team = await findRegisteredTeam(email, "leader");
+    if (team) return response.json({ success: true, token: signTeamToken(team._id), teamHead: team.leader?.name || "" });
+    return response.json({ success: true, token: signTeamToken(access._id, "access"), teamHead: access.email });
+  }
+  // Otherwise the general Team Head password, for payment-verified teams (unchanged behaviour).
+  const passwordOk = passwordMatches(password);
   const team = await findTeamByHeadEmail(email);
   if (!team || !passwordOk) return response.status(401).json(INVALID_LOGIN);
   return response.json({ success: true, token: signTeamToken(team._id), teamHead: team.leader?.name || "" });
@@ -34,7 +49,30 @@ export const teamLogin = async (request, response) => {
 const loadOwnTeam = async (request) => {
   if (!mongoose.isValidObjectId(request.teamRegistrationId)) return null;
   const team = await Registration.findById(request.teamRegistrationId).select("-teamLogo");
-  return team?.payment?.confirmedAt ? team : null;
+  // Payment-verified teams, and registered teams an admin gave login access to.
+  return team?.payment?.confirmedAt || (team && await hasAdminAccess(team.leader?.email)) ? team : null;
+};
+
+const hasAdminAccess = async (email) => Boolean(email && await TeamAccess.exists({ email: String(email).trim().toLowerCase() }));
+export const NOT_LINKED = { success: false, notLinked: true, message: "This login is not linked to a registered team yet. Register your team with this email to submit." };
+
+// Dashboard data for a standalone login-access account (its email has no registered team).
+const accessAccountView = async (request) => {
+  const access = await TeamAccess.findById(request.teamAccessId).lean();
+  if (!access) return null;
+  const rounds = readRounds({});
+  const current = currentRound(rounds);
+  return {
+    success: true,
+    linked: false,
+    team: { teamName: "Not linked to a registered team", teamHead: access.email, teamHeadEmail: access.email, college: "", projectTheme: "Not selected", members: [] },
+    submission: { submitted: false },
+    prototype: null,
+    rounds: Object.entries(rounds).map(([key, status]) => ({ key, number: ROUND_INFO[key].number, title: ROUND_INFO[key].title, status })),
+    current: { round: ROUND_INFO[current.key].number, status: current.status },
+    evaluation: null,
+    updatedAt: null,
+  };
 };
 
 const cleanMembers = (members = []) => {
@@ -47,6 +85,10 @@ const cleanMembers = (members = []) => {
 
 // Everything the Team Head may see about their own team — nothing else.
 export const getOwnTeam = async (request, response) => {
+  if (request.teamAccessId) {
+    const view = mongoose.isValidObjectId(request.teamAccessId) ? await accessAccountView(request) : null;
+    return view ? response.json(view) : response.status(401).json({ success: false, message: "Please log in to the Team Head Portal." });
+  }
   const team = await loadOwnTeam(request);
   if (!team) return response.status(401).json({ success: false, message: "Please log in to the Team Head Portal." });
   const rounds = readRounds(team);
@@ -69,6 +111,7 @@ export const getOwnTeam = async (request, response) => {
 
 // Round 2: the logged-in team saves its own prototype link once (the token decides which team).
 export const submitPrototype = async (request, response) => {
+  if (request.teamAccessId) return response.status(403).json(NOT_LINKED);
   const team = await loadOwnTeam(request);
   if (!team) return response.status(401).json({ success: false, message: "Please log in to the Team Head Portal." });
   const view = prototypeView(team, readRounds(team));
@@ -94,6 +137,7 @@ export const submitPrototype = async (request, response) => {
 };
 
 export const streamOwnPdf = async (request, response) => {
+  if (request.teamAccessId) return response.status(404).json({ success: false, message: "Your team has not submitted a PDF yet." });
   const team = await loadOwnTeam(request);
   if (!team) return response.status(401).json({ success: false, message: "Please log in to the Team Head Portal." });
   if (!team.pdfSubmission?.fileId) return response.status(404).json({ success: false, message: "Your team has not submitted a PDF yet." });

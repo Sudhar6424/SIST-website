@@ -4,6 +4,7 @@ import { createAdmin, deleteAdmin, listAdmins, updateAdmin } from "../controller
 import { getEvaluationSettings, listSubmissions, retrySelectionEmail, saveEvaluation, streamSubmissionPdf, updateEvaluationSettings } from "../controllers/evaluationController.js";
 import { updatePaymentSettings } from "../controllers/paymentSettingsController.js";
 import { bulkDeleteTeams, bulkUpdateTeams, deleteTeam } from "../controllers/teamManagementController.js";
+import { applyTeamAccess, deleteTeamAccess, listTeamAccess, updateTeamAccess } from "../controllers/teamAccessController.js";
 import { decideRound, listRoundSelection, retryRoundEmail } from "../controllers/roundSelectionController.js";
 import { listRounds, resendRoundEmail, updateRounds } from "../controllers/roundsController.js";
 import { requireAdmin, requireSection } from "../middleware/authMiddleware.js";
@@ -22,6 +23,10 @@ router.get("/registrations", requireSection("teams"), getRegistrations);
 router.get("/colleges", requireSection("teams"), getColleges);
 router.put("/registrations/:id", requireSection("teams"), updateRegistration);
 router.delete("/registrations/:id", requireSection("teams"), deleteTeam);
+router.get("/team-access", requireSection("teams"), listTeamAccess);
+router.put("/team-access", requireSection("teams"), applyTeamAccess);
+router.patch("/team-access/:id", requireSection("teams"), updateTeamAccess);
+router.delete("/team-access/:id", requireSection("teams"), deleteTeamAccess);
 router.post("/registrations/bulk-delete", requireSection("teams"), bulkDeleteTeams);
 router.post("/registrations/bulk-update", requireSection("teams"), bulkUpdateTeams);
 

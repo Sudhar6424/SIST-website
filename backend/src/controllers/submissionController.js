@@ -1,5 +1,8 @@
+import mongoose from "mongoose";
 import multer from "multer";
 import Registration from "../models/Registration.js";
+import TeamAccess from "../models/TeamAccess.js";
+import { NOT_LINKED } from "./teamPortalController.js";
 import { deletePdf, deriveSubmissionStatus, isPdfBuffer, isWellFormedToken, MAX_PDF_SIZE_BYTES, safePdfFileName, storePdf, tokenLookupQuery } from "../services/submissionService.js";
 
 const INVALID_LINK = { success: false, message: "This submission link is invalid. Please use the link from your DEXATHON 2026 confirmation email." };
@@ -50,8 +53,10 @@ export const receivePdf = async (request, response, next) => {
 // The Team Head Portal provides the registration identity through its signed token,
 // so a logged-in team can only upload against its own record.
 export const receiveOwnPdf = async (request, response, next) => {
-  const registration = await Registration.findById(request.teamRegistrationId);
-  if (!registration?.payment?.confirmedAt) return response.status(401).json({ success: false, message: "Please log in to the Team Head Portal." });
+  if (request.teamAccessId) return response.status(403).json(NOT_LINKED);
+  const registration = mongoose.isValidObjectId(request.teamRegistrationId) ? await Registration.findById(request.teamRegistrationId) : null;
+  const adminAccess = registration && !registration.payment?.confirmedAt && await TeamAccess.exists({ email: String(registration.leader?.email || "").trim().toLowerCase() });
+  if (!registration?.payment?.confirmedAt && !adminAccess) return response.status(401).json({ success: false, message: "Please log in to the Team Head Portal." });
   if (registration.pdfSubmission?.fileId) return response.status(409).json(ALREADY_SUBMITTED);
   request.registration = registration;
   upload(request, response, (error) => {

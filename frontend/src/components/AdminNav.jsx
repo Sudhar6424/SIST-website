@@ -6,6 +6,7 @@ export const ADMIN_LINKS = [
   ["/admin/dashboard", "Dashboard", "dashboard"],
   ["/admin/payment-history", "Payment History", "payments"],
   ["/admin/teams", "Teams", "teams"],
+  ["/admin/team-access", "Team Login Access", "teams"],
   ["/admin/pdf-submissions", "PDF Submissions", "pdf"],
   ["/admin/rounds", "Round Status", "rounds"],
   ["/admin/round-selection", "Round Selection", "rounds"],
